@@ -1,113 +1,157 @@
+# =========================================================
+# Data Preprocessing for Machine Learning
+# California Housing Dataset (90-point solution)
+# =========================================================
+
+import os
+import tarfile
+import urllib.request
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
-# Load dataset
-# Agar dataset CSV fayl ko‘rinishida bo‘lmasa, o‘zimiz kichkina namunaviy dataset tuzamiz:
-data = pd.DataFrame({
-    "price": [500000, 600000, 550000, 700000, 800000, 620000, 750000, 950000],
-    "area": [2000, 2500, 1800, 3000, 3200, 2100, 2800, 3500],
-    "bedrooms": [3, 4, 3, 4, 5, 3, 4, 5],
-    "bathrooms": [2, 3, 2, 3, 4, 2, 3, 4],
-    "stories": [2, 2, 1, 2, 3, 2, 2, 3],
-    "mainroad": ["yes","yes","no","yes","yes","no","yes","yes"],
-    "guestroom": ["no","yes","no","yes","no","no","yes","yes"],
-    "basement": ["yes","no","no","yes","yes","no","yes","yes"],
-    "hotwaterheating": ["no","no","no","yes","yes","no","no","yes"],
-    "airconditioning": ["yes","no","no","yes","yes","no","yes","yes"],
-    "parking": [1,2,1,2,3,1,2,3],
-    "prefarea": ["yes","no","no","yes","yes","no","yes","yes"],
-    "furnishingstatus": ["furnished","semi-furnished","unfurnished","furnished",
-                         "semi-furnished","unfurnished","furnished","semi-furnished"]
-})
+# ---------------------------------------------------------
+# 1. Download & Load Dataset
+# ---------------------------------------------------------
 
-print(data.head())
+DOWNLOAD_ROOT = "https://github.com/ageron/data/raw/main/"
+HOUSING_PATH = os.path.join("datasets", "housing")
+HOUSING_URL = DOWNLOAD_ROOT + "housing.tgz"
 
-# Preprocessing
-# Binary categorical variables: yes->1, no->0
-binary_cols = ["mainroad","guestroom","basement","hotwaterheating","airconditioning","prefarea"]
-for col in binary_cols:
-    data[col] = data[col].map({"yes":1,"no":0})
+def fetch_housing_data(housing_url=HOUSING_URL, housing_path=HOUSING_PATH):
+    os.makedirs(housing_path, exist_ok=True)
+    tgz_path = os.path.join(housing_path, "housing.tgz")
+    urllib.request.urlretrieve(housing_url, tgz_path)
+    with tarfile.open(tgz_path) as housing_tgz:
+        housing_tgz.extractall(path=housing_path)
 
-# Furnishingstatus -> one-hot encoding
-data = pd.get_dummies(data, columns=["furnishingstatus"], drop_first=True)
+fetch_housing_data()
 
-print(data.head())
+df = pd.read_csv(os.path.join(HOUSING_PATH, "housing.csv"))
 
-# Check missing values
-print(data.isnull().sum())
+# ---------------------------------------------------------
+# Part 1: Exploratory Data Analysis (EDA)
+# ---------------------------------------------------------
 
-# 4. Feature-target split
-X = data.drop("price", axis=1)
-y = data["price"]
+print("\nFIRST 10 ROWS:")
+print(df.head(10))
 
-#  Feature scaling
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)
+print("\nDATASET INFO:")
+print(df.info())
 
-#  Train-test split
-X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
+print("\nSUMMARY STATISTICS:")
+print(df.describe())
 
-#  Model training
-model = LinearRegression()
-model.fit(X_train, y_train)
+print("\nCATEGORICAL VALUE COUNTS:")
+print(df["ocean_proximity"].value_counts())
 
-# Coefficients
-coeff_df = pd.DataFrame(model.coef_, X.columns, columns=["Coefficient"])
-print(coeff_df)
-print(f"Intercept: {model.intercept_}")
+# Identify numerical and categorical columns
+num_cols = df.select_dtypes(include=[np.number]).columns
+cat_cols = df.select_dtypes(include=["object"]).columns
 
-#  Predictions
-y_pred = model.predict(X_test)
+print("\nNUMERICAL FEATURES:")
+print(num_cols.tolist())
 
+print("\nCATEGORICAL FEATURES:")
+print(cat_cols.tolist())
 
-mae = mean_absolute_error(y_test, y_pred)
-mse = mean_squared_error(y_test, y_pred)
-r2 = r2_score(y_test, y_pred)
+# ---------------------------------------------------------
+# Part 2: Missing Values
+# ---------------------------------------------------------
 
-print("\nModel Evaluation:")
-print(f"MAE: {mae:.2f}")
-print(f"MSE: {mse:.2f}")
-print(f"R²: {r2:.2f}")
+print("\nMISSING VALUES PER COLUMN:")
+print(df.isnull().sum())
 
+# Missing report function
+def missing_report(dataframe):
+    missing_count = dataframe.isnull().sum()
+    missing_percent = (missing_count / len(dataframe)) * 100
+    report = pd.DataFrame({
+        "column": missing_count.index,
+        "missing_count": missing_count.values,
+        "missing_percent": missing_percent.values
+    })
+    return report[report["missing_count"] > 0]
 
-plt.figure(figsize=(10,7))
-sns.heatmap(data.corr(), annot=True, cmap="coolwarm")
-plt.title("Correlation Heatmap")
+print("\nMISSING REPORT:")
+print(missing_report(df))
+
+# Median imputation for total_bedrooms
+df["total_bedrooms"] = df["total_bedrooms"].fillna(
+    df["total_bedrooms"].median()
+)
+
+# ---------------------------------------------------------
+# Part 3: Encoding Categorical Variables
+# ---------------------------------------------------------
+
+df_encoded = pd.get_dummies(df, columns=["ocean_proximity"])
+
+print("\nDATA AFTER ONE-HOT ENCODING:")
+print(df_encoded.head())
+
+# ---------------------------------------------------------
+# Part 4: Feature Scaling
+# ---------------------------------------------------------
+
+scale_features = [
+    "median_income",
+    "housing_median_age",
+    "population",
+    "median_house_value"
+]
+
+# Histograms before scaling
+df[scale_features].hist(bins=30, figsize=(10, 6))
+plt.suptitle("Before Scaling")
 plt.show()
 
+# Standard Scaling
+std_scaler = StandardScaler()
+df_std = df_encoded.copy()
+df_std[scale_features] = std_scaler.fit_transform(df_std[scale_features])
 
-plt.figure(figsize=(7,5))
-plt.scatter(y_test, y_pred, color="blue")
-plt.plot([y.min(), y.max()], [y.min(), y.max()], "r--")
-plt.xlabel("Actual Prices")
-plt.ylabel("Predicted Prices")
-plt.title("Predicted vs Actual House Prices")
+# Min-Max Scaling
+mm_scaler = MinMaxScaler()
+df_mm = df_encoded.copy()
+df_mm[scale_features] = mm_scaler.fit_transform(df_mm[scale_features])
+
+# Histograms after Standard Scaling
+df_std[scale_features].hist(bins=30, figsize=(10, 6))
+plt.suptitle("After Standard Scaling")
 plt.show()
 
-house_features = pd.DataFrame({
-    "area":[2400],
-    "bedrooms":[4],
-    "bathrooms":[3],
-    "stories":[2],
-    "mainroad":[1],
-    "guestroom":[0],
-    "basement":[1],
-    "hotwaterheating":[0],
-    "airconditioning":[1],
-    "parking":[2],
-    "prefarea":[1],
-    "furnishingstatus_semi-furnished":[1],
-    "furnishingstatus_unfurnished":[0]
-})
+# Histograms after Min-Max Scaling
+df_mm[scale_features].hist(bins=30, figsize=(10, 6))
+plt.suptitle("After Min-Max Scaling")
+plt.show()
 
-house_features_scaled = scaler.transform(house_features)
-predicted_price = model.predict(house_features_scaled)
+# ---------------------------------------------------------
+# Part 5: Feature Engineering (Optional)
+# ---------------------------------------------------------
 
-print(f"\nPredicted price for the given house: ${predicted_price[0]:.2f}")
+df_fe = df_encoded.copy()
+
+df_fe["rooms_per_household"] = (
+    df_fe["total_rooms"] / df_fe["households"]
+)
+
+df_fe["bedrooms_per_room"] = (
+    df_fe["total_bedrooms"] / df_fe["total_rooms"]
+)
+
+df_fe["population_per_household"] = (
+    df_fe["population"] / df_fe["households"]
+)
+
+print("\nFEATURE ENGINEERING SAMPLE:")
+print(df_fe[[
+    "rooms_per_household",
+    "bedrooms_per_room",
+    "population_per_household"
+]].head())
+
+print("\nPreprocessing completed successfully.")
